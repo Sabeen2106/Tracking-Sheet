@@ -15,7 +15,7 @@ business_unit_map = {
     "NETHERLANDS": {"Sender Name": "Netherlands", "Sender Location Id": "0100646888"},
     "SPAIN": {"Sender Name": "Spain", "Sender Location Id": "5000449357"},
     "HQ": {"Sender Name": "HQ", "Sender Location Id": "1000358868"},
-    "Coca-Cola HBC Northern Ireland Ltd": {"Sender Name": "Coca-Cola HBC Northern Ireland Ltd", "Sender Location Id": "5000513592"}
+    "CCH": {"Sender Name": "Coca-Cola HBC Northern Ireland Ltd", "Sender Location Id": "5000513592"}
 }
 
 # =========================
@@ -121,7 +121,7 @@ def process_cch(df, business_unit, pooler, batch_number):
     tracking_df = pd.DataFrame()
 
     tracking_df['Movement Date'] = df['Date']
-    tracking_df['Business Unit'] = business_unit
+    tracking_df['Business Unit'] = business_unit_map[business_unit]['Sender Name']
     tracking_df['Pooler'] = pooler
     tracking_df['Movement Direction'] = 'Out'
     tracking_df['Pallet Type'] = df['Pallet Type']
@@ -150,7 +150,7 @@ def process_cch(df, business_unit, pooler, batch_number):
 # =========================
 processors = {
     "ITALY": process_italy,
-    "Coca-Cola HBC Northern Ireland Ltd": process_cch
+    "CCH": process_cch
 }
 # =========================
 # No Processor Defined
@@ -170,7 +170,6 @@ if uploaded_file and batch_number:
     processor = processors.get(business_unit, process_default)
 
     tracking_df = processor(df, business_unit, pooler, batch_number)
-
     buffer = BytesIO()
     tracking_df.to_excel(buffer, index=False)
     buffer.seek(0)
