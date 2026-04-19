@@ -39,14 +39,16 @@ uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 def load_lookup():
     df_lookup = pd.read_excel("CCH IPP and CHEP.xlsx")
 
-    # Clean columns properly
+    # Clean columns
     df_lookup.columns = (
         df_lookup.columns
         .str.strip()
         .str.replace('\xa0', '', regex=True)
     )
 
-    # Rename
+    # Rename safely
+    df_lookup.rename(columns=lambda x: x.strip(), inplace=True)
+
     df_lookup.rename(columns={
         'Shipment to party Number': 'Customer',
         'Location ID': 'GID'
@@ -54,11 +56,10 @@ def load_lookup():
 
     return df_lookup
 
-
-# 👉 CALL FUNCTION OUTSIDE
+# CALL FUNCTION OUTSIDE
 lookup_df = load_lookup()
 
-# 👉 DEBUG (optional)
+# DEBUG
 st.write("Lookup Columns:", lookup_df.columns.tolist())
 
     # SAFER RENAME
