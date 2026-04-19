@@ -101,7 +101,7 @@ if uploaded_file and batch_number:
     tracking_df = tracking_df.dropna(subset=['Movement Date'])
 
     # Convert to Excel in memory
-  output_file = f"{batch_number.strip().replace(' ', '_')}.xlsx"
+    output_file = f"[batch_number.strip().replace(' ', '_')}.xlsx"
 
     from io import BytesIO
     buffer = BytesIO()
