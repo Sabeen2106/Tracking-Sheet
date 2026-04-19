@@ -34,13 +34,16 @@ uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 @st.cache_data
 def load_lookup():
     df_lookup = pd.read_excel("CCH IPP and CHEP.xlsx")
+    df_lookup.columns = df_lookup.columns.str.strip()
 
-    # CLEAN PROPERLY
-    df_lookup.columns = (
-        df_lookup.columns
-        .str.strip()
-        .str.replace('\xa0', '', regex=True)
-    )
+    df_lookup.rename(columns={
+        'Shipment to party Number': 'Customer',
+        'Location ID': 'GID'
+    }, inplace=True)
+
+    return df_lookup
+
+lookup_df = load_lookup()
 
     print("LOOKUP COLUMNS:", df_lookup.columns.tolist())  # DEBUG
 
