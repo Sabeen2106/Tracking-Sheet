@@ -47,9 +47,6 @@ if uploaded_file and batch_number:
 
         df['Prodotto'] = df['Prodotto'].apply(map_pallet_type)
 
-        df['MTTRDT'] = pd.to_datetime(df['MTTRDT'], format='%Y%m%d', errors='coerce')
-        df['MTTRDT'] = df['MTTRDT'].dt.strftime('%d/%m/%Y')
-
         tracking_df = pd.DataFrame()
 
         tracking_df['Movement Date'] = df['Dt Bolla']
