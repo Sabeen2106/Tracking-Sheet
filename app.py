@@ -200,7 +200,7 @@ elif business_unit == "CCH":
         'Declared Status': 'Declared'
     })
      
-    else:
+    elif business_unit == "Italy"
 
         df = df.iloc[3:].reset_index(drop=True)
         df.columns = df.columns.str.strip()
