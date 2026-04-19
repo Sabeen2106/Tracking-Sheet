@@ -171,8 +171,6 @@ if uploaded_file and batch_number:
 
     tracking_df = processor(df, business_unit, pooler, batch_number)
 
-    tracking_df = tracking_df.dropna(subset=['Movement Date'])
-
     buffer = BytesIO()
     tracking_df.to_excel(buffer, index=False)
     buffer.seek(0)
