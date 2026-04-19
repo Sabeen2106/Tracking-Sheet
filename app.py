@@ -150,7 +150,7 @@ def process_cch(df, business_unit, pooler, batch_number):
 # =========================
 processors = {
     "ITALY": process_italy,
-    "CCH": process_cch
+    "Coca-Cola HBC Northern Ireland Ltd": process_cch
 }
 # =========================
 # No Processor Defined
