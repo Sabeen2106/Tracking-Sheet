@@ -14,8 +14,7 @@ business_unit_map = {
     "ITALY": {"Sender Name": "Italy", "Sender Location Id": "0101230808"},
     "NETHERLANDS": {"Sender Name": "Netherlands", "Sender Location Id": "0100646888"},
     "SPAIN": {"Sender Name": "Spain", "Sender Location Id": "5000449357"},
-    "HQ": {"Sender Name": "HQ", "Sender Location Id": "1000358868"},
-    "CCH": {"Sender Name": "Coca-Cola HBC Northern Ireland Ltd", "Sender Location Id": "5000513592"}
+    "HQ": {"Sender Name": "HQ", "Sender Location Id": "1000358868"}
 }
 
 # =========================
@@ -29,47 +28,11 @@ batch_number = st.text_input("Enter Batch Number")
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
 # =========================
-# LOAD LOOKUP FILE (CACHED)
-# =========================
-# =========================
-# LOAD LOOKUP FILE (CACHED)
+# PROCESSORS
 # =========================
 
-@st.cache_data
-def load_lookup():
-    df_lookup = pd.read_excel("CCH IPP and CHEP.xlsx")
+def process_italy(df, business_unit, pooler, batch_number):
 
-    # Clean columns
-    df_lookup.columns = (
-        df_lookup.columns
-        .str.strip()
-        .str.replace('\xa0', '', regex=True)
-    )
-
-    # Rename safely
-    df_lookup.rename(columns=lambda x: x.strip(), inplace=True)
-
-    df_lookup.rename(columns={
-        'Shipment to party Number': 'Customer',
-        'Location ID': 'GID'
-    }, inplace=True)
-
-    return df_lookup
-
-# CALL FUNCTION OUTSIDE
-lookup_df = load_lookup()
-
-# DEBUG
-st.write("Lookup Columns:", lookup_df.columns.tolist())
-
-# SAFER RENAME
-df_lookup.rename(columns=lambda x: x.strip(), inplace=True)
-
-# =========================
-# PROCESSORS (MODULAR)
-# =========================
-
-def process_italy(df, lookup_df, business_unit, pooler, batch_number):
     def map_pallet_type(value):
         if isinstance(value, str) and "3-B1208A" in value:
             return "CHEP 03 - Euro"
@@ -101,85 +64,86 @@ def process_italy(df, lookup_df, business_unit, pooler, batch_number):
         'Declared Status': 'Declared'
     })
 
-def process_cch(df, lookup_df, business_unit, pooler, batch_number):
-    # Clean columns
-    df.columns = df.columns.str.strip().str.replace('\xa0', '', regex=True)
 
-    # Rename
+# =========================
+# AUSTRIA (SIMPLIFIED)
+# =========================
+def process_austria(df, business_unit, pooler, batch_number):
+
+    df = df.iloc[3:].reset_index(drop=True)
+    df.columns = df.columns.str.strip()
+
     df.rename(columns={
-        'Ship to Party Number': 'Customer',
-        'Delivery': 'Reference',
-        'Billing doc. date': 'Date'
+        'Unnamed: 4': 'Qty',
+        'Unnamed: 6': 'Pallet Type',
+        'Unnamed: 8': 'Reference',
+        'Unnamed: 9': 'Date',
+        'Unnamed: 10': 'Customer',
+        'Unnamed: 12': 'GID'
     }, inplace=True)
 
-    # Clean key
-    df['Customer'] = df['Customer'].astype(str).str.strip()
+    df = df[['Qty', 'Pallet Type', 'Reference', 'Date', 'Customer', 'GID']]
 
-    # Use cached lookup_df (DO NOT reload)
-    lookup_df
+    df['Pallet Type'] = df['Pallet Type'].astype(str).str.strip().map({
+        '03': 'CHEP 03 - Euro',
+        '01': 'CHEP 01 - UK'
+    })
 
-    lookup_df['Customer'] = lookup_df['Customer'].astype(str).str.strip()
+    df['Date'] = pd.to_datetime(df['Date'], format='%Y%m%d', errors='coerce')
+    df['Date'] = df['Date'].dt.strftime('%d/%m/%Y')
 
-    # Merge (XLOOKUP)
-    df = df.merge(
-        lookup_df[['Customer', 'GID']],
-        on='Customer',
-        how='left'
-    )
+    grouped = df.groupby(
+        ['Reference', 'Pallet Type'],
+        as_index=False
+    ).agg({
+        'Qty': 'sum',
+        'Date': 'first',
+        'Customer': 'first',
+        'GID': 'first'
+    })
 
-    # Fix date (Excel serial)
-    df['Date'] = pd.to_datetime(
-        df['Date'],
-        unit='D',
-        origin='1899-12-30',
-        errors='coerce'
-    ).dt.strftime('%d/%m/%Y')
+    return pd.DataFrame({
+        'Movement Date': grouped['Date'],
+        'Business Unit': business_unit_map[business_unit]['Sender Name'],
+        'Pooler': pooler,
+        'Movement Direction': 'Out',
+        'Pallet Type': grouped['Pallet Type'],
+        'Reference 1': grouped['Reference'],
+        'Reference 2': '',
+        'Reference 3': '',
+        'Batch Number': batch_number,
+        'Sender Location Id': business_unit_map[business_unit]['Sender Location Id'],
+        'Sender Name': business_unit_map[business_unit]['Sender Name'],
+        'Sender Town': '',
+        'Sender Postcode': '',
+        'Receiver Location Id': grouped['GID'],
+        'Receiver Name': grouped['Customer'],
+        'Receiver Town': '',
+        'Receiver Postcode': '',
+        'Movement Type': f"Out - {pooler} Austria Drop Point",
+        'Quantity': grouped['Qty'],
+        'Savings': '',
+        'Declared Status': 'Declared'
+    })
 
-    # Pallet
-    df['Pallet Type'] = 'CHEP 01 - UK'
-
-    # Build output
-    tracking_df = pd.DataFrame()
-
-    tracking_df['Movement Date'] = df['Date']
-    tracking_df['Business Unit'] = business_unit_map[business_unit]['Sender Name']
-    tracking_df['Pooler'] = pooler
-    tracking_df['Movement Direction'] = 'Out'
-    tracking_df['Pallet Type'] = df['Pallet Type']
-    tracking_df['Reference 1'] = df['Reference']
-    tracking_df['Reference 2'] = ''
-    tracking_df['Reference 3'] = ''
-    tracking_df['Batch Number'] = batch_number
-
-    # Sender
-    tracking_df['Sender Location Id'] = business_unit_map[business_unit]['Sender Location Id']
-    tracking_df['Sender Name'] = business_unit_map[business_unit]['Sender Name']
-
-    # Receiver
-    tracking_df['Receiver Location Id'] = df['GID']
-    tracking_df['Receiver Name'] = df['Customer']
-
-    # Movement
-    tracking_df['Movement Type'] = f"Out - {pooler} Drop Point"
-    tracking_df['Quantity'] = df['Qty']
-    tracking_df['Declared Status'] = 'Declared'
-
-    return tracking_df
 
 # =========================
 # PROCESSOR MAP
 # =========================
 processors = {
     "ITALY": process_italy,
-    "CCH": process_cch
+    "AUSTRIA": process_austria
 }
-# =========================
-# No Processor Defined
-# =========================
 
+
+# =========================
+# DEFAULT
+# =========================
 def process_default(df, business_unit, pooler, batch_number):
     st.error(f"No processor defined for {business_unit}")
     return pd.DataFrame()
+
+
 # =========================
 # MAIN EXECUTION
 # =========================
@@ -190,7 +154,8 @@ if uploaded_file and batch_number:
 
     processor = processors.get(business_unit, process_default)
 
-    tracking_df = processor(df, lookup_df, business_unit, pooler, batch_number)
+    tracking_df = processor(df, business_unit, pooler, batch_number)
+
     buffer = BytesIO()
     tracking_df.to_excel(buffer, index=False)
     buffer.seek(0)
