@@ -62,10 +62,10 @@ lookup_df = load_lookup()
 # DEBUG
 st.write("Lookup Columns:", lookup_df.columns.tolist())
 
-    # SAFER RENAME
-    df_lookup.rename(columns=lambda x: x.strip(), inplace=True)
+# SAFER RENAME
+df_lookup.rename(columns=lambda x: x.strip(), inplace=True)
 
-    df_lookup.rename(columns={
+df_lookup.rename(columns={
         'Shipment to party Number': 'Customer',
         'Location ID': 'GID'
     }, inplace=True)
