@@ -43,8 +43,6 @@ def load_lookup():
 
     return df_lookup
 
-lookup_df = load_lookup()
-
 # =========================
 # PROCESSORS (MODULAR)
 # =========================
@@ -81,144 +79,80 @@ def process_italy(df, business_unit, pooler, batch_number):
         'Declared Status': 'Declared'
     })
 
-
 def process_cch(df, business_unit, pooler, batch_number):
 
-    df.columns = df.columns.str.strip()
+    # Clean columns
+    df.columns = df.columns.str.strip().str.replace('\xa0', '', regex=True)
 
+    # Rename
     df.rename(columns={
-        'Difference': 'Qty',
+        'Ship to Party Number': 'Customer',
         'Delivery': 'Reference',
-        'Billing doc. date': 'Date',
-        'Ship to Party Number': 'Customer'
+        'Billing doc. date': 'Date'
     }, inplace=True)
 
-    df = df[['Qty', 'Reference', 'Date', 'Customer']]
+    # Clean key
+    df['Customer'] = df['Customer'].astype(str).str.strip()
 
-    # XLOOKUP via merge
-    df = df.merge(lookup_df[['Customer', 'GID']], on='Customer', how='left')
+    # Use cached lookup_df (DO NOT reload)
+    global lookup_df
 
+    lookup_df['Customer'] = lookup_df['Customer'].astype(str).str.strip()
+
+    # Merge (XLOOKUP)
+    df = df.merge(
+        lookup_df[['Customer', 'GID']],
+        on='Customer',
+        how='left'
+    )
+
+    # Fix date (Excel serial)
+    df['Date'] = pd.to_datetime(
+        df['Date'],
+        unit='D',
+        origin='1899-12-30',
+        errors='coerce'
+    ).dt.strftime('%d/%m/%Y')
+
+    # Pallet
     df['Pallet Type'] = 'CHEP 01 - UK'
 
-    df['Date'] = pd.to_datetime(df['Date'], format='%Y%m%d', errors='coerce')
-    df['Date'] = df['Date'].dt.strftime('%d/%m/%Y')
+    # Build output
+    tracking_df = pd.DataFrame()
 
-    # Handle missing GIDs
-    missing = df[df['GID'].isna()]
+    tracking_df['Movement Date'] = df['Date']
+    tracking_df['Business Unit'] = business_unit
+    tracking_df['Pooler'] = pooler
+    tracking_df['Movement Direction'] = 'Out'
+    tracking_df['Pallet Type'] = df['Pallet Type']
+    tracking_df['Reference 1'] = df['Reference']
+    tracking_df['Reference 2'] = ''
+    tracking_df['Reference 3'] = ''
+    tracking_df['Batch Number'] = batch_number
 
-    if not missing.empty:
-        st.warning("⚠️ Missing GID for some customers. Please fill below:")
+    # Sender
+    tracking_df['Sender Location Id'] = business_unit_map[business_unit]['Sender Location Id']
+    tracking_df['Sender Name'] = business_unit_map[business_unit]['Sender Name']
 
-        unique_customers = missing['Customer'].drop_duplicates()
+    # Receiver
+    tracking_df['Receiver Location Id'] = df['GID']
+    tracking_df['Receiver Name'] = df['Customer']
 
-        editable_df = pd.DataFrame({
-            'Customer': unique_customers,
-            'GID': [''] * len(unique_customers)
-        })
+    # Movement
+    tracking_df['Movement Type'] = f"Out - {pooler} Drop Point"
+    tracking_df['Quantity'] = df['Qty']
+    tracking_df['Declared Status'] = 'Declared'
 
-        edited_df = st.data_editor(editable_df)
+    return tracking_df
+# =========================
+# CLEAN & EXPORT
+# =========================
+tracking_df = tracking_df.dropna(subset=['Movement Date'])
 
-        if st.button("Apply Missing GIDs"):
-            if '' in edited_df['GID'].values:
-                st.error("Please fill all GIDs")
-                st.stop()
+output_file = f"{batch_number}.xlsx"
+tracking_df.to_excel(output_file, index=False)
 
-            mapping = dict(zip(edited_df['Customer'], edited_df['GID']))
-
-            df['GID'] = df.apply(
-                lambda row: mapping.get(row['Customer'], row['GID']),
-                axis=1
-            )
-
-            st.success("GIDs updated")
-            st.stop()
-
-    df_grouped = df.groupby(['Reference', 'Pallet Type'], as_index=False).agg({
-        'Qty': 'sum',
-        'Date': 'first',
-        'Customer': 'first',
-        'GID': 'first'
-    })
-
-    return pd.DataFrame({
-        'Movement Date': df_grouped['Date'],
-        'Business Unit': business_unit,
-        'Pooler': pooler,
-        'Movement Direction': 'Out',
-        'Pallet Type': df_grouped['Pallet Type'],
-        'Reference 1': df_grouped['Reference'],
-        'Reference 2': '',
-        'Reference 3': '',
-        'Batch Number': batch_number,
-        'Sender Location Id': business_unit_map[business_unit]['Sender Location Id'],
-        'Sender Name': business_unit_map[business_unit]['Sender Name'],
-        'Sender Town': '',
-        'Sender Postcode': '',
-        'Receiver Location Id': df_grouped['GID'],
-        'Receiver Name': df_grouped['Customer'],
-        'Receiver Town': '',
-        'Receiver Postcode': '',
-        'Movement Type': f"Out - {pooler} Drop Point",
-        'Quantity': df_grouped['Qty'],
-        'Savings': '',
-        'Declared Status': 'Declared'
-    })
-
-
-def process_default(df, business_unit, pooler, batch_number):
-
-    df = df.iloc[3:].reset_index(drop=True)
-    df.columns = df.columns.str.strip()
-
-    df.rename(columns={
-        'Unnamed: 4': 'Qty',
-        'Unnamed: 6': 'Pallet Type',
-        'Unnamed: 8': 'Reference',
-        'Unnamed: 9': 'Date',
-        'Unnamed: 10': 'Customer',
-        'Unnamed: 12': 'GID'
-    }, inplace=True)
-
-    df = df[['Qty', 'Pallet Type', 'Reference', 'Date', 'Customer', 'GID']]
-
-    df['Pallet Type'] = df['Pallet Type'].astype(str).str.strip().map({
-        '03': 'CHEP 03 - Euro',
-        '01': 'CHEP 01 - UK'
-    })
-
-    df['Date'] = pd.to_datetime(df['Date'], format='%Y%m%d', errors='coerce')
-    df['Date'] = df['Date'].dt.strftime('%d/%m/%Y')
-
-    df_grouped = df.groupby(['Reference', 'Pallet Type'], as_index=False).agg({
-        'Qty': 'sum',
-        'Date': 'first',
-        'Customer': 'first',
-        'GID': 'first'
-    })
-
-    return pd.DataFrame({
-        'Movement Date': df_grouped['Date'],
-        'Business Unit': business_unit,
-        'Pooler': pooler,
-        'Movement Direction': 'Out',
-        'Pallet Type': df_grouped['Pallet Type'],
-        'Reference 1': df_grouped['Reference'],
-        'Reference 2': '',
-        'Reference 3': '',
-        'Batch Number': batch_number,
-        'Sender Location Id': business_unit_map[business_unit]['Sender Location Id'],
-        'Sender Name': business_unit_map[business_unit]['Sender Name'],
-        'Sender Town': '',
-        'Sender Postcode': '',
-        'Receiver Location Id': df_grouped['GID'],
-        'Receiver Name': df_grouped['Customer'],
-        'Receiver Town': '',
-        'Receiver Postcode': '',
-        'Movement Type': f"Out - {pooler} Drop Point",
-        'Quantity': df_grouped['Qty'],
-        'Savings': '',
-        'Declared Status': 'Declared'
-    })
+print(f"✅ Tracking sheet created: {output_file}")
 
 # =========================
 # PROCESSOR MAP
@@ -227,7 +161,13 @@ processors = {
     "ITALY": process_italy,
     "CCH": process_cch
 }
+# =========================
+# No Processor Defined
+# =========================
 
+def process_default(df, business_unit, pooler, batch_number):
+    st.error(f"No processor defined for {business_unit}")
+    return pd.DataFrame()
 # =========================
 # MAIN EXECUTION
 # =========================
