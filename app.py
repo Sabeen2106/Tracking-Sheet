@@ -62,7 +62,7 @@ def load_lookup():
 # PROCESSORS (MODULAR)
 # =========================
 
-def process_italy(df, business_unit, pooler, batch_number):
+def process_italy(df, lookup_df, business_unit, pooler, batch_number):
     def map_pallet_type(value):
         if isinstance(value, str) and "3-B1208A" in value:
             return "CHEP 03 - Euro"
@@ -109,7 +109,7 @@ def process_cch(df, lookup_df, business_unit, pooler, batch_number):
     df['Customer'] = df['Customer'].astype(str).str.strip()
 
     # Use cached lookup_df (DO NOT reload)
-    global lookup_df
+    lookup_df
 
     lookup_df['Customer'] = lookup_df['Customer'].astype(str).str.strip()
 
