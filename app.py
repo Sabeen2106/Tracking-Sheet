@@ -74,7 +74,7 @@ df_lookup.rename(columns={
 if 'Customer' not in df_lookup.columns:
     raise ValueError(f"Customer column not found in lookup file. Columns: {df_lookup.columns.tolist()}")
 
-    return df_lookup
+return df_lookup
 
 # =========================
 # PROCESSORS (MODULAR)
