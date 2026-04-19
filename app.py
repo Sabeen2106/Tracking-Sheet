@@ -34,12 +34,27 @@ uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 @st.cache_data
 def load_lookup():
     df_lookup = pd.read_excel("CCH IPP and CHEP.xlsx")
-    df_lookup.columns = df_lookup.columns.str.strip()
+
+    # CLEAN PROPERLY
+    df_lookup.columns = (
+        df_lookup.columns
+        .str.strip()
+        .str.replace('\xa0', '', regex=True)
+    )
+
+    print("LOOKUP COLUMNS:", df_lookup.columns.tolist())  # DEBUG
+
+    # SAFER RENAME
+    df_lookup.rename(columns=lambda x: x.strip(), inplace=True)
 
     df_lookup.rename(columns={
         'Shipment to party Number': 'Customer',
         'Location ID': 'GID'
     }, inplace=True)
+
+    # ✅ SAFETY CHECK
+    if 'Customer' not in df_lookup.columns:
+        raise ValueError(f"Customer column not found in lookup file. Columns: {df_lookup.columns.tolist()}")
 
     return df_lookup
 
@@ -79,8 +94,7 @@ def process_italy(df, business_unit, pooler, batch_number):
         'Declared Status': 'Declared'
     })
 
-def process_cch(df, business_unit, pooler, batch_number):
-
+def process_cch(df, lookup_df, business_unit, pooler, batch_number):
     # Clean columns
     df.columns = df.columns.str.strip().str.replace('\xa0', '', regex=True)
 
@@ -169,7 +183,7 @@ if uploaded_file and batch_number:
 
     processor = processors.get(business_unit, process_default)
 
-    tracking_df = processor(df, business_unit, pooler, batch_number)
+    tracking_df = processor(df, lookup_df, business_unit, pooler, batch_number)
     buffer = BytesIO()
     tracking_df.to_excel(buffer, index=False)
     buffer.seek(0)
