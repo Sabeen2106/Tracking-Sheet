@@ -144,15 +144,6 @@ def process_cch(df, business_unit, pooler, batch_number):
     tracking_df['Declared Status'] = 'Declared'
 
     return tracking_df
-# =========================
-# CLEAN & EXPORT
-# =========================
-tracking_df = tracking_df.dropna(subset=['Movement Date'])
-
-output_file = f"{batch_number}.xlsx"
-tracking_df.to_excel(output_file, index=False)
-
-print(f"✅ Tracking sheet created: {output_file}")
 
 # =========================
 # PROCESSOR MAP
