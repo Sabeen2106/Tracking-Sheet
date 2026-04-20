@@ -42,7 +42,7 @@ def process_italy(df, business_unit, pooler, batch_number):
 
     return pd.DataFrame({
         'Movement Date': df['Dt Bolla'],
-        'Business Unit': business_unit,
+        'Business Unit': business_unit_map[business_unit]['Sender Name'],
         'Pooler': pooler,
         'Movement Direction': 'Out',
         'Pallet Type': df['Prodotto'],
