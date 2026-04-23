@@ -120,7 +120,7 @@ def process_austria(df, business_unit, pooler, batch_number):
         'Receiver Name': grouped['Customer'],
         'Receiver Town': '',
         'Receiver Postcode': '',
-        'Movement Type': f"Out - {pooler} Austria Drop Point",
+        'Movement Type': f"Out - {pooler} Drop Point",
         'Quantity': grouped['Qty'],
         'Savings': '',
         'Declared Status': 'Declared'
