@@ -309,12 +309,20 @@ if main_file:
 
     columns = df.columns.tolist()
 
-    if pooler == "CHEP":
-        movement_date_col = st.selectbox("Select column for Movement Date", columns)
-    else:
-        movement_date_col = None
-        st.info("IPP: Candidate dates can be generated from the previous 12 calendar days, excluding today and Sundays. Verify dates against actual movements before declaration.")
-        generate_dates = st.checkbox("Generate proposed IPP movement dates (requires verification)", value=False)
+    ipp_date_mode = "Actual dates"
+    if pooler == "IPP":
+        ipp_date_mode = st.radio(
+            "Select IPP Movement Date Option",
+            ["Actual dates", "Random dates"],
+            horizontal=True,
+        )
+        if ipp_date_mode == "Random dates":
+            st.info("Proposed dates will be generated within the previous 12 calendar days, excluding today and Sundays. Verify against actual movement records before declaration.")
+    movement_date_col = (
+        st.selectbox("Select column for Movement Date", columns)
+        if pooler == "CHEP" or ipp_date_mode == "Actual dates"
+        else None
+    )
     quantity_col = st.selectbox("Select column for Quantity", columns)
     pallet_type_col = st.selectbox("Select column for Pallet Type", columns)
     reference_col = st.selectbox("Select column for Reference", columns)
@@ -353,17 +361,15 @@ if main_file:
             st.error("Please enter Batch Number.")
             st.stop()
 
-        if pooler == "IPP" and not generate_dates:
-            st.error("Please confirm whether to generate proposed IPP dates, or use CHEP to retain source dates.")
-            st.stop()
-
+        st.session_state["prepared_ipp_date_mode"] = ipp_date_mode
         st.session_state["prepared_pooler"] = pooler
         st.session_state["prepared_business_unit"] = business_unit
         work_df = df.copy()
 
-        if pooler == "CHEP":
+        if pooler == "CHEP" or ipp_date_mode == "Actual dates":
             work_df["Movement Date Parsed"] = work_df[movement_date_col].apply(convert_date_to_ddmmyyyy)
             work_df["Movement Date Parsed"] = pd.to_datetime(work_df["Movement Date Parsed"], errors="coerce")
+            st.session_state["ipp_dates_generated"] = False
         else:
             # Retain any source date for audit/reference; never overwrite the uploaded file.
             source_date_col = next((c for c in work_df.columns if c.lower() in
@@ -524,14 +530,14 @@ if st.session_state.get("need_lookup_mapping", False):
             st.session_state["need_lookup_mapping"] = False
 
 
-if "work_df" in st.session_state and (st.session_state.get("prepared_pooler") != pooler or st.session_state.get("prepared_business_unit") != business_unit):
+if "work_df" in st.session_state and (st.session_state.get("prepared_pooler") != pooler or st.session_state.get("prepared_business_unit") != business_unit or (pooler == "IPP" and st.session_state.get("prepared_ipp_date_mode") != ipp_date_mode)):
     st.warning("Pooler changed. Please click Prepare Data again before generating files.")
 
-if "work_df" in st.session_state and st.session_state.get("prepared_pooler") == pooler and st.session_state.get("prepared_business_unit") == business_unit:
+if "work_df" in st.session_state and st.session_state.get("prepared_pooler") == pooler and st.session_state.get("prepared_business_unit") == business_unit and (pooler != "IPP" or st.session_state.get("prepared_ipp_date_mode") == ipp_date_mode):
     work_df = st.session_state["work_df"].copy()
     work_df["GID"] = work_df["GID"].apply(clean_gid).astype("string")
 
-    if pooler == "IPP":
+    if pooler == "IPP" and st.session_state.get("ipp_dates_generated", False):
         st.warning("IPP dates are randomly generated proposals, not evidence of actual movement dates. Check and correct them against supporting records before using a declaration file.")
         st.dataframe(work_df[["Reference", "Movement Date", "Original Movement Date"]].drop_duplicates(), hide_index=True)
 
@@ -631,7 +637,7 @@ if "work_df" in st.session_state and st.session_state.get("prepared_pooler") == 
         st.success("No missing GIDs found.")
 
     verified_ipp_dates = True
-    if pooler == "IPP":
+    if pooler == "IPP" and st.session_state.get("ipp_dates_generated", False):
         verified_ipp_dates = st.checkbox(
             "I have checked the proposed IPP dates against actual movement records and corrected any discrepancies."
         )
