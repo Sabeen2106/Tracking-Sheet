@@ -3,21 +3,46 @@ import pandas as pd
 from io import BytesIO
 import re
 
-business_unit_map = {
-    "Austria": {"Sender Name": "Austria", "Sender Location Id": "5000692765"},
-    "Denmark": {"Sender Name": "Denmark", "Sender Location Id": "5000538928"},
-    "Driffield": {"Sender Name": "Driffield", "Sender Location Id": "5000503209"},
-    "France": {"Sender Name": "France", "Sender Location Id": "0101076563"},
-    "Ireland": {"Sender Name": "Ireland", "Sender Location Id": "5000515873"},
-    "Italy": {"Sender Name": "Italy", "Sender Location Id": "0101230808"},
-    "Netherlands": {"Sender Name": "Netherlands", "Sender Location Id": "0100646888"},
-    "Spain": {"Sender Name": "Spain", "Sender Location Id": "5000449357"},
-    "HQ": {"Sender Name": "HQ", "Sender Location Id": "1000358868"},
-    "Coca-Cola HBC Northern Ireland Ltd": {
-        "Sender Name": "Coca-Cola HBC Northern Ireland Ltd",
-        "Sender Location Id": "5000513592"
-    }
+# Sender accounts are separated by pooler so IDs cannot be mixed.
+chep_accounts = {
+    "Austria": "5000692765",
+    "Denmark": "5000538928",
+    "Driffield": "5000503209",
+    "France": "0101076563",
+    "Ireland": "5000515873",
+    "Italy": "0101230808",
+    "Netherlands": "0100646888",
+    "Spain": "5000449357",
+    "HQ": "1000358868",
+    "Coca-Cola HBC Northern Ireland Ltd": "5000513592",
+    "Kepak Group Ltd - Merthyr": "0101280939",
+    "Kepak Group Ltd - McIntosh": "0101280937",
+    "Kepak Group Ltd - Bodmin": "0101280938",
+    "Matthew Walker": "101430678",
+    "Valeo Confectionery Limited (Rowse Honey)": "5000465750",
 }
+ipp_accounts = {
+    "Graham's Dairies (Bridge of Allan)": "404262",
+    "Graham's Dairies (Nairn) Ltd": "405230",
+    "Graham's Dairies - Glenfield": "405730",
+    "Matthew Walker": "509465",
+    "Valeo Confectionery Limited (Rowse Honey)": "509468",
+    "Coca-Cola HBC Northern Ireland Ltd": "405296",
+}
+accounts_by_pooler = {"CHEP": chep_accounts, "IPP": ipp_accounts}
+
+
+def generate_ipp_dates(references, today=None):
+    """Create random candidate dates from the previous 12 calendar days, excluding Sundays.
+
+    One date per reference keeps grouped movements consistent. These are
+    *proposed* dates, not verified actual movement dates.
+    """
+    import secrets
+    today = pd.Timestamp.today().normalize() if today is None else pd.Timestamp(today).normalize()
+    eligible = [today - pd.Timedelta(days=i) for i in range(1, 13)
+                if (today - pd.Timedelta(days=i)).weekday() != 6]
+    return {ref: secrets.choice(eligible) for ref in pd.unique(references)}
 
 
 def clean_columns(df):
@@ -37,8 +62,16 @@ def clean_gid(value):
     return value
 
 
-def map_pallet_type(value):
+def map_pallet_type(value, pooler):
     value = str(value).strip().upper()
+
+    if pooler == "IPP":
+        if value in ("A1210", "IPP A1210 - UK"):
+            return "IPP A1210 - UK"
+        if value in ("E812", "IPP E812 - EURO"):
+            return "IPP E812 - Euro"
+        return value
+
 
     if (
         "PALLET 1000X1200 MM" in value
@@ -235,7 +268,7 @@ def build_tracking_file(final_df, business_unit, pooler, batch_number):
 
     tracking_df = pd.DataFrame({
         "Movement Date": grouped["Movement Date"],
-        "Business Unit": business_unit_map[business_unit]["Sender Name"],
+        "Business Unit": business_unit,
         "Pooler": pooler,
         "Movement Direction": "Out",
         "Pallet Type": grouped["Pallet Type"],
@@ -243,8 +276,8 @@ def build_tracking_file(final_df, business_unit, pooler, batch_number):
         "Reference 2": "",
         "Reference 3": "",
         "Batch Number": batch_number,
-        "Sender Location Id": business_unit_map[business_unit]["Sender Location Id"],
-        "Sender Name": business_unit_map[business_unit]["Sender Name"],
+        "Sender Location Id": accounts_by_pooler[pooler][business_unit],
+        "Sender Name": business_unit,
         "Sender Town": "",
         "Sender Postcode": "",
         "Receiver Location Id": grouped["GID"].apply(clean_gid),
@@ -262,8 +295,8 @@ def build_tracking_file(final_df, business_unit, pooler, batch_number):
 
 st.title("PP Tracking Sheet")
 
-business_unit = st.selectbox("Select Business Unit", list(business_unit_map.keys()))
-pooler = "CHEP"
+pooler = st.selectbox("Select Pooler", ["CHEP", "IPP"])
+business_unit = st.selectbox("Select Business Unit / Sender Account", list(accounts_by_pooler[pooler].keys()))
 batch_number = st.text_input("Enter Batch Number")
 
 main_file = st.file_uploader("Upload Main Excel File", type=["xlsx"])
@@ -276,7 +309,12 @@ if main_file:
 
     columns = df.columns.tolist()
 
-    movement_date_col = st.selectbox("Select column for Movement Date", columns)
+    if pooler == "CHEP":
+        movement_date_col = st.selectbox("Select column for Movement Date", columns)
+    else:
+        movement_date_col = None
+        st.info("IPP: Candidate dates can be generated from the previous 12 calendar days, excluding today and Sundays. Verify dates against actual movements before declaration.")
+        generate_dates = st.checkbox("Generate proposed IPP movement dates (requires verification)", value=False)
     quantity_col = st.selectbox("Select column for Quantity", columns)
     pallet_type_col = st.selectbox("Select column for Pallet Type", columns)
     reference_col = st.selectbox("Select column for Reference", columns)
@@ -315,10 +353,26 @@ if main_file:
             st.error("Please enter Batch Number.")
             st.stop()
 
+        if pooler == "IPP" and not generate_dates:
+            st.error("Please confirm whether to generate proposed IPP dates, or use CHEP to retain source dates.")
+            st.stop()
+
+        st.session_state["prepared_pooler"] = pooler
+        st.session_state["prepared_business_unit"] = business_unit
         work_df = df.copy()
 
-        work_df["Movement Date Parsed"] = work_df[movement_date_col].apply(convert_date_to_ddmmyyyy)
-        work_df["Movement Date Parsed"] = pd.to_datetime(work_df["Movement Date Parsed"], errors="coerce")
+        if pooler == "CHEP":
+            work_df["Movement Date Parsed"] = work_df[movement_date_col].apply(convert_date_to_ddmmyyyy)
+            work_df["Movement Date Parsed"] = pd.to_datetime(work_df["Movement Date Parsed"], errors="coerce")
+        else:
+            # Retain any source date for audit/reference; never overwrite the uploaded file.
+            source_date_col = next((c for c in work_df.columns if c.lower() in
+                                    ("movement date", "date", "transaction date")), None)
+            work_df["Original Movement Date"] = work_df[source_date_col] if source_date_col else ""
+            reference_dates = generate_ipp_dates(work_df[reference_col].apply(clean_reference_number))
+            work_df["Movement Date Parsed"] = work_df[reference_col].apply(clean_reference_number).map(reference_dates)
+            st.session_state["ipp_dates_generated"] = True
+
         work_df["Movement Date"] = work_df["Movement Date Parsed"].apply(safe_format_date)
 
         work_df["Quantity"] = pd.to_numeric(
@@ -328,7 +382,7 @@ if main_file:
 
         work_df = work_df[work_df["Quantity"] != 0].copy()
 
-        work_df["Pallet Type"] = work_df[pallet_type_col].apply(map_pallet_type)
+        work_df["Pallet Type"] = work_df[pallet_type_col].apply(lambda value: map_pallet_type(value, pooler))
         work_df["Reference"] = work_df[reference_col].apply(clean_reference_number)
 
         if business_unit == "Spain":
@@ -470,9 +524,16 @@ if st.session_state.get("need_lookup_mapping", False):
             st.session_state["need_lookup_mapping"] = False
 
 
-if "work_df" in st.session_state:
+if "work_df" in st.session_state and (st.session_state.get("prepared_pooler") != pooler or st.session_state.get("prepared_business_unit") != business_unit):
+    st.warning("Pooler changed. Please click Prepare Data again before generating files.")
+
+if "work_df" in st.session_state and st.session_state.get("prepared_pooler") == pooler and st.session_state.get("prepared_business_unit") == business_unit:
     work_df = st.session_state["work_df"].copy()
     work_df["GID"] = work_df["GID"].apply(clean_gid).astype("string")
+
+    if pooler == "IPP":
+        st.warning("IPP dates are randomly generated proposals, not evidence of actual movement dates. Check and correct them against supporting records before using a declaration file.")
+        st.dataframe(work_df[["Reference", "Movement Date", "Original Movement Date"]].drop_duplicates(), hide_index=True)
 
     today = pd.Timestamp.today().normalize()
 
@@ -480,11 +541,12 @@ if "work_df" in st.session_state:
         today - work_df["Movement Date Parsed"]
     ).dt.days
 
-    old_date_df = work_df[work_df["Days Old"] > 89].copy()
+    processing_window = {"CHEP": 89, "IPP": 12}[pooler]
+    old_date_df = work_df[work_df["Days Old"] > processing_window].copy()
 
     if not old_date_df.empty:
-        st.warning("Some movement dates exceed the CHEP processing window.")
-        st.subheader("Review Dates Over 89 Days")
+        st.warning(f"Some movement dates exceed the {pooler} processing window.")
+        st.subheader(f"Review Dates Over {processing_window} Days")
 
         unique_old_dates = old_date_df[["Reference", "Movement Date"]].drop_duplicates()
 
@@ -493,8 +555,8 @@ if "work_df" in st.session_state:
             old_date = old_row["Movement Date"]
 
             st.error(
-                f"Reference {reference}: {old_date} exceeds 89 days. "
-                "CHEP late declaration charges may apply."
+                f"Reference {reference}: {old_date} exceeds {processing_window} days. "
+                f"{pooler} late declaration charges may apply."
             )
 
             amend_date = st.checkbox(
@@ -568,7 +630,16 @@ if "work_df" in st.session_state:
     else:
         st.success("No missing GIDs found.")
 
+    verified_ipp_dates = True
+    if pooler == "IPP":
+        verified_ipp_dates = st.checkbox(
+            "I have checked the proposed IPP dates against actual movement records and corrected any discrepancies."
+        )
+
     if st.button("Generate Final Files"):
+        if pooler == "IPP" and not verified_ipp_dates:
+            st.error("Please verify the IPP movement dates against actual records before exporting.")
+            st.stop()
         work_df["GID"] = work_df["GID"].apply(clean_gid).astype("string")
 
         for gid_key, gid_value in gid_inputs.items():
