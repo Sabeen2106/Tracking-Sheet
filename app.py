@@ -86,6 +86,12 @@ def map_pallet_type(value, pooler):
     ):
         return "CHEP 03 - Euro"
 
+    if (
+        "CHEP 4001" in value
+        or value in ["CHEP 4001", "4001"]
+    ):
+        return "CHEP 4001 - US Standard"
+
     if "8-B0806A" in value or value == "08":
         return "CHEP 08 - Half"
 
